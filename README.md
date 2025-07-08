@@ -192,8 +192,8 @@ Aquí tienes algunas páginas útiles para probar el scraper, organizadas por ca
 
 ## 📄 Licencia
 
-MIT
+![MIT License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
 
 ---
 
-Desarrollado con ❤️ por [Tu Nombre]
+Desarrollado por OSDEMS Digital Group - Brandon Pérez R
