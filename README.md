@@ -13,6 +13,22 @@ API de alto rendimiento para extracción de correos electrónicos de sitios web,
 ![Pydantic](https://img.shields.io/badge/Pydantic-9209B3?logo=pydantic&logoColor=white&style=for-the-badge)
 ![Asyncio](https://img.shields.io/badge/Asyncio-00A98F?logo=asyncio&logoColor=white&style=for-the-badge)
 
+
+## 📁 Estructura del Proyecto
+
+Directory structure:
+└── brandon12536-web-scraping-backend/ 📁
+    ├── README.md 📄
+    ├── requirements.txt 📄
+    ├── .env-example 📄
+    ├── app/ 📁
+    │   ├── auth.py 📄
+    │   ├── auth_utils.py 📄
+    │   └── main.py 📄
+    └── database/ 📁
+        └── scraping.sql 📄
+
+
 ## 🚀 Características
 
 - Escaneo rápido y concurrente
