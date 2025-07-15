@@ -6,23 +6,22 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Ahora importar el resto de dependencias
-try:
-    from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-    from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-    from pydantic import BaseModel, EmailStr, Field, validator
-    from typing import Optional, List, Dict, Any
-    import random
-    from datetime import datetime, timedelta
-    from pytz import timezone
-    import jwt
-    import secrets
-    import string
-    from passlib.context import CryptContext
-    from supabase import create_client, Client
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-except ImportError as e:
-    print(f"Error importing dependencies: {e}")
-    raise
+oauth2_scheme = HTTPBearer()
+from pydantic import BaseModel, EmailStr, Field, validator
+from typing import Optional, List, Dict, Any
+import random
+from datetime import datetime, timedelta, timezone
+import jwt
+import secrets
+import string
+from passlib.context import CryptContext
+from supabase import create_client, Client
+
+# Si quieres, puedes dejar el try/except solo para lógica específica, no para imports masivos.
 
 # Inicializar cliente de Supabase con validación
 supabase_url = os.getenv("SUPABASE_URL")
@@ -41,7 +40,7 @@ except Exception as e:
 
 # Configuración de seguridad
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
 
 # URL del frontend para verificación de correo
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -62,8 +61,8 @@ token_blacklist = set()
 # Inicializar router
 router = APIRouter(
     prefix="/api/v1/auth",
-    tags=["Authentication"],
-    responses={404: {"description": "Not found"}},
+    tags=["Autenticación"],
+    responses={404: {"description": "No encontrado"}}
 )
 
 # Modelos
@@ -146,6 +145,7 @@ class LoginRequest(BaseModel):
     password: str
 
 class VerifyRequest(BaseModel):
+    email: EmailStr
     token: str
 
 class ResetPasswordRequest(BaseModel):
@@ -154,6 +154,54 @@ class ResetPasswordRequest(BaseModel):
 class NewPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+# Enviar correo con enlace de recuperación de contraseña usando SMTP
+
+def send_reset_password_email(email: str, first_name: str, reset_link: str):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    import os
+
+    smtp_server = os.getenv("EMAIL_HOST")
+    smtp_port = int(os.getenv("EMAIL_PORT", 587))
+    smtp_username = os.getenv("EMAIL_USER")
+    smtp_password = os.getenv("EMAIL_PASS")
+
+    sender_email = smtp_username
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "Recupera tu contraseña"
+    message["From"] = sender_email
+    message["To"] = email
+
+    html = f"""
+    <html>
+      <body style='font-family:Segoe UI,Arial,sans-serif;background:#f5f7fa;'>
+        <div style='max-width:480px;margin:40px auto;background:#fff;padding:32px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.04);'>
+          <h2 style='color:#4f8cff;'>Hola {first_name or 'usuario'},</h2>
+          <p>Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente botón:</p>
+          <div style='text-align:center;margin:32px 0;'>
+            <a href=\"{reset_link}\" style='background:#4f8cff;color:#fff;padding:16px 32px;border-radius:6px;text-decoration:none;font-size:18px;'>Restablecer contraseña</a>
+          </div>
+          <p>Si no solicitaste este cambio, puedes ignorar este correo.</p>
+          <p style='color:#888;font-size:12px;'>El enlace expirará en 1 hora.</p>
+        </div>
+      </body>
+    </html>
+    """
+
+    part = MIMEText(html, "html")
+    message.attach(part)
+
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(sender_email, email, message.as_string())
+        print(f"[OK] Correo de recuperación enviado a {email}")
+    except Exception as e:
+        print(f"[ERROR] Fallo al enviar correo de recuperación a {email}: {str(e)}")
 
 # Funciones de utilidad
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -198,8 +246,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
     if not response.data:
         raise credentials_exception
         
-    user_data = response.data[0]
-    user = UserInDB(**user_data)
+    user = response.data[0]
+    user = UserInDB(**user)
     
     if user is None:
         raise credentials_exception
@@ -215,15 +263,16 @@ def send_verification_email(email: str, first_name: str, verification_code: str)
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
+    import logging
     
     # Obtener el dominio del correo del usuario
     user_domain = email.split('@')[-1] if '@' in email else 'app.com'
     
-    # Configuración del correo desde variables de entorno
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", 465))
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+    # Configuración del correo desde variables de entorno (adaptado a tu .env)
+    smtp_server = os.getenv("EMAIL_HOST")
+    smtp_port = int(os.getenv("EMAIL_PORT", 587))
+    smtp_username = os.getenv("EMAIL_USER")
+    smtp_password = os.getenv("EMAIL_PASS")
     
     # Configuración dinámica del remitente
     email_from_name = f"{first_name} desde {user_domain}" if first_name else f"Soporte de {user_domain}"
@@ -239,15 +288,41 @@ def send_verification_email(email: str, first_name: str, verification_code: str)
     # Crear el contenido HTML del correo
     html = f"""
     <html>
-      <body>
-        <h2>Hola {first_name},</h2>
-        <p>Gracias por registrarte. Usa el siguiente código para verificar tu correo electrónico:</p>
-        <h1 style="text-align: center; font-size: 36px; letter-spacing: 5px; margin: 20px 0; padding: 20px; background: #f4f4f4; border-radius: 5px;">
-            {verification_code}
-        </h1>
-        <p>Este código expirará en 24 horas.</p>
-        <p>Si no solicitaste este código, puedes ignorar este mensaje.</p>
-        <p>Saludos,<br>El equipo de Soporte</p>
+      <body style='margin:0;padding:0;background:#f5f7fa;font-family:Segoe UI,Arial,sans-serif;'>
+        <table width='100%' cellpadding='0' cellspacing='0' border='0' style='background:#f5f7fa;'>
+          <tr>
+            <td align='center'>
+              <table width='480' cellpadding='0' cellspacing='0' border='0' style='background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.04);margin:40px 0;'>
+                <tr>
+                  <td style='background:#4f8cff;padding:24px 0;border-radius:8px 8px 0 0;text-align:center;'>
+                    <span style='font-size:24px;color:#fff;font-weight:600;letter-spacing:1px;'>Bienvenido a la Plataforma</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style='padding:32px 32px 12px 32px;'>
+                    <h2 style='margin:0 0 8px 0;font-size:22px;font-weight:500;color:#222;'>Hola {first_name},</h2>
+                    <p style='margin:0 0 20px 0;font-size:16px;color:#444;'>¡Gracias por registrarte! Para completar tu registro, verifica tu correo electrónico usando el siguiente código:</p>
+                    <div style='text-align:center;margin:32px 0;'>
+                      <span style='display:inline-block;background:#eaf1fb;color:#214f8c;font-size:32px;font-weight:bold;letter-spacing:8px;padding:18px 32px;border-radius:8px;border:1px solid #d7e3fa;'>{verification_code}</span>
+                    </div>
+                    <p style='margin:18px 0 0 0;font-size:15px;color:#666;'>Este código expirará en 24 horas.</p>
+                    <p style='margin:0;font-size:13px;color:#888;'>Si no solicitaste este código, puedes ignorar este correo.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style='padding:24px 32px 32px 32px;'>
+                    <p style='margin:0;font-size:15px;color:#4f8cff;font-weight:500;'>El equipo de Soporte</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style='background:#f5f7fa;padding:18px 0 8px 0;border-radius:0 0 8px 8px;text-align:center;'>
+                    <span style='font-size:12px;color:#b0b0b0;'>© 2025 Tu Empresa. Todos los derechos reservados.</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
     """
@@ -257,17 +332,15 @@ def send_verification_email(email: str, first_name: str, verification_code: str)
     message.attach(part)
     
     try:
-        # Enviar el correo usando SMTP
-        with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
-            # Usar las credenciales SMTP para autenticación
+        # Enviar el correo usando SMTP con STARTTLS (TLS seguro, puerto 587)
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
             server.login(smtp_username, smtp_password)
-            # Enviar con el remitente dinámico
             server.sendmail(sender_email, email, message.as_string())
-        print(f"Correo de verificación enviado a {email}")
-        
+        print(f"[OK] Correo de verificación enviado a {email}")
     except Exception as e:
-        # Si falla el envío, mostrar el código en consola para desarrollo
-        print(f"Error al enviar correo: {str(e)}")
+        logging.error(f"[ERROR] Fallo al enviar correo a {email}: {str(e)}")
         print(f"\n{'='*50}\n"
               f"Código de verificación para {first_name} ({email}):\n"
               f"{verification_code}\n"
@@ -276,13 +349,13 @@ def send_verification_email(email: str, first_name: str, verification_code: str)
 
 # Endpoints de la API
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: RegisterRequest, background_tasks: BackgroundTasks):
+async def register(user: RegisterRequest, background_tasks: BackgroundTasks):
     """
     Registrar un nuevo usuario
     """
     try:
         # Verificar si el correo ya está registrado
-        existing_user = supabase.table('users').select('*').eq('email', user_data.email).execute()
+        existing_user = supabase.table('users').select('*').eq('email', user.email).execute()
         if existing_user.data and len(existing_user.data) > 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -295,27 +368,9 @@ async def register(user_data: RegisterRequest, background_tasks: BackgroundTasks
         # Asignar rol: admin si no hay administradores, cliente en caso contrario
         role = 'admin' if not admin_check.data or len(admin_check.data) == 0 else 'client'
         
-        # Crear usuario en Auth
-        auth_response = supabase.auth.sign_up({
-            'email': user_data.email,
-            'password': user_data.password,
-            'options': {
-                'data': {
-                    'first_name': user_data.first_name or '',
-                    'last_name': user_data.last_name or '',
-                    'role': role
-                }
-            }
-        })
-        
-        if not auth_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Error al crear el usuario en el servicio de autenticación"
-            )
-            
-        # Crear usuario en la tabla public.users
-        user_id = str(auth_response.user.id)
+        # Generar un id único para el usuario (puedes usar uuid4 si quieres)
+        import uuid
+        user_id = str(uuid.uuid4())
         # Generar código de verificación de 6 dígitos
         verification_code = str(random.randint(100000, 999999))
         verification_expiry = (datetime.utcnow() + timedelta(hours=24)).isoformat()
@@ -323,12 +378,12 @@ async def register(user_data: RegisterRequest, background_tasks: BackgroundTasks
         # Insertar usuario en public.users según el esquema de la base de datos
         user_record = {
             'id_users': user_id,
-            'email': user_data.email,
-            'first_name': user_data.first_name or None,
-            'last_name': user_data.last_name or None,
+            'email': user.email,
+            'first_name': user.first_name or None,
+            'last_name': user.last_name or None,
             'role': role,
             'is_active': True,
-            'password_hash': get_password_hash(user_data.password),
+            'password_hash': get_password_hash(user.password),
             'is_verified': False,
             'verification_token': verification_code,  # Guardar el código de 6 dígitos
             'verification_token_expiry': verification_expiry
@@ -357,17 +412,17 @@ async def register(user_data: RegisterRequest, background_tasks: BackgroundTasks
         # Enviar correo con el código de verificación
         background_tasks.add_task(
             send_verification_email,
-            email=user_data.email,
-            first_name=user_data.first_name or 'Usuario',
+            email=user.email,
+            first_name=user.first_name or 'Usuario',
             verification_code=verification_code  # Enviar el código en lugar del enlace
         )
         
         # Devolver datos del usuario sin información sensible
         return {
             'id': user_id,
-            'email': user_data.email,
-            'first_name': user_data.first_name or '',
-            'last_name': user_data.last_name or '',
+            'email': user.email,
+            'first_name': user.first_name or '',
+            'last_name': user.last_name or '',
             'role': role,  # Usar el rol asignado (admin o client)
             'is_active': True,
             'is_verified': False,
@@ -395,78 +450,41 @@ async def login(login_data: LoginRequest):
     Autenticar usuario y devolver token JWT
     """
     try:
-        # Autenticar con Supabase
-        auth_response = supabase.auth.sign_in_with_password({
-            'email': login_data.email,
-            'password': login_data.password
-        })
-        
-        if not auth_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Correo electrónico o contraseña incorrectos",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # Obtener usuario de la tabla public.users
-        response = supabase.table('users')\
-            .select('*')\
-            .eq('email', login_data.email)\
-            .single()\
-            .execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Usuario no encontrado"
-            )
-        
-        user_data = response.data
-        
-        # Verificar si el usuario está activo
-        if not user_data.get('is_active', False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="La cuenta está desactivada"
-            )
-        
-        # Verificar si el correo está verificado
-        if not user_data.get('is_verified', False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Por favor verifica tu correo electrónico antes de iniciar sesión"
-            )
-        
-        # Actualizar último inicio de sesión
-        now = datetime.utcnow().isoformat()
-        supabase.table('users')\
-            .update({'last_login': now})\
-            .eq('id', user_data['id'])\
-            .execute()
+        # Buscar usuario por email en tu tabla
+        user_response = supabase.table('users').select('*').eq('email', login_data.email).single().execute()
+        user = user_response.data
+        if not user:
+            raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
+        # Verifica el hash de la contraseña
+        if not verify_password(login_data.password, user['password_hash']):
+            raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
+        # Verifica que esté verificado
+        if not user.get('is_verified'):
+            raise HTTPException(status_code=401, detail="Debes verificar tu correo electrónico antes de iniciar sesión")
+        # Genera el token JWT y responde
         
         # Crear token JWT
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user_data["email"]}, 
+            data={"sub": user["email"]}, 
             expires_delta=access_token_expires
         )
         
         # Preparar respuesta del usuario
         user_response = {
-            'id': user_data['id'],
-            'email': user_data['email'],
-            'first_name': user_data.get('first_name'),
-            'last_name': user_data.get('last_name'),
-            'role': user_data.get('role', 'client'),
-            'is_active': user_data.get('is_active', True),
-            'is_verified': user_data.get('is_verified', False),
-            'company': user_data.get('company'),
-            'website': user_data.get('website'),
-            'is_super_admin': user_data.get('is_super_admin', False),
-            'created_at': user_data.get('created_at'),
-            'updated_at': user_data.get('updated_at'),
-            'last_login': now
-        }
+            'id_users': user['id_users'],
+            'email': user['email'],
+            'first_name': user.get('first_name'),
+            'last_name': user.get('last_name'),
+            'role': user.get('role', 'client'),
+            'is_active': user.get('is_active', True),
+            'is_verified': user.get('is_verified', False),
+            'company': user.get('company'),
+            'website': user.get('website'),
+            'is_super_admin': user.get('is_super_admin', False),
+            'created_at': user.get('created_at'),
+            'updated_at': user.get('updated_at'),
+                    }
         
         return {
             "access_token": access_token,
@@ -487,57 +505,74 @@ async def verify_email(verify_data: VerifyRequest):
     """
     Verificar el correo electrónico del usuario usando el código de verificación
     """
+    import logging
     try:
-        # Buscar usuario por código de verificación
-        user_data = supabase.table('users').select('*').eq('verification_token', verify_data.token).execute()
+        # Buscar usuario por email y código de verificación
+        user = supabase.table('users').select('*')\
+            .eq('email', verify_data.email)\
+            .eq('verification_token', verify_data.token)\
+            .execute()
         
-        if not user_data.data or len(user_data.data) == 0:
+        if not user.data or len(user.data) == 0:
+            logging.warning(f"No se encontró usuario con email={verify_data.email} y token={verify_data.token}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Código de verificación inválido o expirado"
             )
-            
-        user = user_data.data[0]
-        
+        user = user.data[0]
+        # Si ya está verificado
+        if user.get('is_verified'):
+            return {"message": "El correo electrónico ya está verificado"}
+        # Si el token o la expiración es None
+        if not user.get('verification_token') or not user.get('verification_token_expiry'):
+            logging.error(f"Token o expiración nulos para usuario {verify_data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El código de verificación no está disponible o ya fue usado"
+            )
         # Verificar si el código ha expirado
-        expiry_date = datetime.fromisoformat(user['verification_token_expiry']).replace(tzinfo=timezone.utc)
+        try:
+            expiry_date = user['verification_token_expiry']
+            if isinstance(expiry_date, str):
+                expiry_date = datetime.fromisoformat(expiry_date).replace(tzinfo=timezone.utc)
+            elif hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo is None:
+                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+        except Exception as dt_err:
+            logging.error(f"Error al convertir la fecha de expiración: {dt_err}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error en la fecha de expiración: {dt_err}"
+            )
         if datetime.now(timezone.utc) > expiry_date:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El código de verificación ha expirado"
             )
-            
-        # Actualizar usuario como verificado
-        update_data = {
+        # Marcar como verificado y limpiar token
+        supabase.table('users').update({
             'is_verified': True,
             'verification_token': None,
-            'verification_token_expiry': None,
-            'updated_at': datetime.utcnow().isoformat(),
-            'email_verified_at': datetime.utcnow().isoformat()
-        }
-        
-        supabase.table('users').update(update_data).eq('id_users', user['id_users']).execute()
-        
-        return {"message": "Correo electrónico verificado exitosamente"}
-        
+            'verification_token_expiry': None
+        }).eq('id_users', user['id_users']).execute()
+        return {"message": "Correo verificado exitosamente"}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error en la verificación de correo: {str(e)}")
+        logging.error(f"Error inesperado en la verificación: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al verificar el correo electrónico"
         )
 
 @router.post("/forgot-password")
-async def forgot_password(reset_data: ResetPasswordRequest):
+async def forgot_password(reset_data: ResetPasswordRequest, background_tasks: BackgroundTasks):
     """
     Enviar correo electrónico para restablecer la contraseña
     """
     try:
         # Verificar si el usuario existe
         response = supabase.table('users')\
-            .select('id,email,first_name')\
+            .select('id_users,email,first_name')\
             .eq('email', reset_data.email)\
             .single()\
             .execute()
@@ -546,7 +581,7 @@ async def forgot_password(reset_data: ResetPasswordRequest):
             # No revelar que el correo no existe
             return {"message": "Si tu correo está registrado, recibirás un enlace para restablecer la contraseña"}
         
-        user_data = response.data
+        user = response.data
         reset_token = str(uuid.uuid4())
         reset_expiry = (datetime.utcnow() + timedelta(hours=24)).isoformat()
         
@@ -557,12 +592,20 @@ async def forgot_password(reset_data: ResetPasswordRequest):
                 'reset_password_token_expiry': reset_expiry,
                 'updated_at': datetime.utcnow().isoformat()
             })\
-            .eq('id', user_data['id'])\
+            .eq('id_users', user['id_users'])\
             .execute()
         
         # En una aplicación real, aquí enviarías un correo con el enlace
         reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
-        print(f"Enlace de restablecimiento de contraseña para {user_data['email']}: {reset_link}")
+        print(f"Enlace de restablecimiento de contraseña para {user['email']}: {reset_link}")
+        
+        # Enviar el correo real de recuperación
+        background_tasks.add_task(
+            send_reset_password_email,
+            email=user['email'],
+            first_name=user.get('first_name', 'Usuario'),
+            reset_link=reset_link
+        )
         
         return {"message": "Si tu correo está registrado, recibirás un enlace para restablecer la contraseña"}
         
@@ -590,21 +633,16 @@ async def reset_password(reset_data: NewPasswordRequest):
                 detail="Token de restablecimiento inválido o expirado"
             )
         
-        user_data = response.data
+        user = response.data
         
         # Verificar si el token ha expirado
-        expiry_date = datetime.fromisoformat(user_data['reset_password_token_expiry'])
-        if datetime.utcnow() > expiry_date:
+        expiry_date = datetime.fromisoformat(user['reset_password_token_expiry'])
+        now = datetime.now(expiry_date.tzinfo) if expiry_date.tzinfo else datetime.utcnow()
+        if now > expiry_date:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El enlace de restablecimiento ha expirado"
             )
-        
-        # Actualizar contraseña
-        supabase.auth.admin.update_user_by_id(
-            user_data['id'],
-            {'password': reset_data.new_password}
-        )
         
         # Actualizar hash de contraseña en la base de datos
         supabase.table('users')\
@@ -614,7 +652,7 @@ async def reset_password(reset_data: NewPasswordRequest):
                 'reset_password_token_expiry': None,
                 'updated_at': datetime.utcnow().isoformat()
             })\
-            .eq('id', user_data['id'])\
+            .eq('id_users', user['id_users'])\
             .execute()
         
         return {"message": "Contraseña restablecida exitosamente"}
@@ -626,48 +664,24 @@ async def reset_password(reset_data: NewPasswordRequest):
             detail="No se pudo restablecer la contraseña"
         )
 
+# Inicializa el blacklist al inicio del archivo si no existe
+token_blacklist = set()
+
 @router.post("/logout")
-async def logout(token: str = Depends(oauth2_scheme)):
+async def logout(token: HTTPAuthorizationCredentials = Depends(oauth2_scheme)):
     """
     Cerrar sesión del usuario actual e invalidar el token
     """
+    token_str = token.credentials  # Extrae el Bearer token
+    print(f"[DEBUG] Token recibido en logout: {token_str}")
     try:
-        # Decodificar el token para obtener su expiración
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        
-        # Agregar el token a la lista negra hasta que expire
-        token_blacklist.add(token)
-        
-        # Programar la eliminación del token de la lista negra después de su expiración
-        expire_timestamp = payload.get("exp")
-        if expire_timestamp:
-            from datetime import datetime
-            expire_datetime = datetime.fromtimestamp(expire_timestamp)
-            current_time = datetime.utcnow()
-            time_until_expire = (expire_datetime - current_time).total_seconds()
-            
-            # Si el token ya expiró, no es necesario hacer nada más
-            if time_until_expire > 0:
-                # Programar la eliminación del token después de que expire
-                import asyncio
-                
-                async def remove_expired_token():
-                    await asyncio.sleep(time_until_expire)
-                    token_blacklist.discard(token)
-                
-                asyncio.create_task(remove_expired_token())
-        
-        # Cerrar sesión en Supabase Auth
-        try:
-            supabase.auth.sign_out()
-        except Exception as e:
-            print(f"Error al cerrar sesión en Supabase: {e}")
-        
-        return {"message": "Sesión cerrada exitosamente"}
-        
-    except JWTError as e:
-        # Si hay un error al decodificar el token, no es necesario hacer nada
-        # ya que el token ya es inválido
-        pass
+        payload = jwt.decode(token_str, SECRET_KEY, algorithms=[ALGORITHM])
+        # Agregar el token a la blacklist
+        token_blacklist.add(token_str)
+        return {"message": "Sesión cerrada correctamente"}
+    except jwt.ExpiredSignatureError:
+        return {"message": "El token ya ha expirado"}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
     
     return {"message": "Sesión cerrada exitosamente"}

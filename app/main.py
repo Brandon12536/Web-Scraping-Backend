@@ -76,7 +76,21 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",  # Habilitar Swagger UI en /docs
     redoc_url="/redoc",  # Habilitar ReDoc en /redoc
-    openapi_url="/openapi.json"  # Ruta del esquema OpenAPI
+    openapi_url="/openapi.json",  # Ruta del esquema OpenAPI
+    openapi_tags=[
+        {
+            "name": "Autenticación",
+            "description": "Operaciones de inicio/cierre de sesión y gestión de usuarios."
+        },
+        {
+            "name": "Scraping",
+            "description": "Extracción automatizada de correos electrónicos y datos de sitios web."
+        },
+        {
+            "name": "Estado",
+            "description": "Consulta el estado y funcionamiento actual del servicio de scraping."
+        }
+    ]
 )
 
 # Configuración CORS
