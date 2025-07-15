@@ -16,17 +16,18 @@ API de alto rendimiento para extracción de correos electrónicos de sitios web,
 
 ## 📁 Estructura del Proyecto
 
-Directory structure:
-└── brandon12536-web-scraping-backend/ 📁
-    ├── README.md 📄
-    ├── requirements.txt 📄
-    ├── .env-example 📄
-    ├── app/ 📁
-    │   ├── auth.py 📄
-    │   ├── auth_utils.py 📄
-    │   └── main.py 📄
-    └── database/ 📁
-        └── scraping.sql 📄
+```
+📁 brandon12536-web-scraping-backend/
+├── 📄 README.md
+├── 📄 requirements.txt
+├── 📄 .env-example
+├── 📁 app/
+│   ├── 📄 auth.py
+│   ├── 📄 auth_utils.py
+│   └── 📄 main.py
+└── 📁 database/
+    └── 📄 scraping.sql
+```
 
 
 ## 🚀 Características
