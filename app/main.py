@@ -497,7 +497,7 @@ class EmailScraper:
         
         try:
             # Configurar el timeout global
-            async with asyncio.timeout(timeout):
+            async def scrape_main():
                 # Asegurarse de que la URL base esté en la cola
                 parsed_url = urlparse(url)
                 self.base_domain = parsed_url.netloc
@@ -518,19 +518,15 @@ class EmailScraper:
                 try:
                     await self.queue.join()
                 except asyncio.CancelledError:
-                    logger.info("Escaneo cancelado por tiempo agotado")
-                
-                # Cancelar workers
-                for worker in workers:
-                    worker.cancel()
-                
-                # Esperar a que las tareas se cancelen
-                await asyncio.gather(*workers, return_exceptions=True)
-                
+                    pass
+                finally:
+                    for w in workers:
+                        w.cancel()
+                    await asyncio.gather(*workers, return_exceptions=True)
+
                 logger.info(f"Finalizado scraping de {url}. "
-                           f"Páginas: {len(self.visited_urls)}, "
-                           f"Correos: {len(self.emails)}")
-                
+                            f"Páginas: {len(self.visited_urls)}, "
+                            f"Correos: {len(self.emails)}")
                 return {
                     "url": url,
                     "emails": list(self.emails)[:max_emails],  # Limitar al máximo solicitado
@@ -538,6 +534,10 @@ class EmailScraper:
                     "emails_found": min(len(self.emails), max_emails),
                     "execution_time_seconds": round(time.time() - start_time, 2)
                 }
+
+            result = await asyncio.wait_for(scrape_main(), timeout)
+            return result
+
                 
         except asyncio.TimeoutError:
             logger.warning(f"Tiempo de espera agotado ({timeout}s) para el escaneo de {url}")
