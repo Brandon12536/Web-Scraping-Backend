@@ -33,10 +33,23 @@ except ImportError as e:
     print(f"Error importing dependencies: {e}")
     raise
 
-# Import auth router
-from . import auth
-import aiohttp
-from typing import Union
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["servers"] = [
+        {"url": "https://web-scraping-backend-2.onrender.com", "description": "Producción"},
+        {"url": "http://localhost:8000", "description": "Local"}
+    ]
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 # Configuración de logging
 logging.basicConfig(level=logging.INFO)
