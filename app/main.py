@@ -679,6 +679,17 @@ class EmailScraper:
 # Include auth router
 app.include_router(auth.router)
 
+# Ruta raíz
+@app.get("/", tags=["Inicio"])
+async def root():
+    """Página de inicio de la API"""
+    return {
+        "message": "Bienvenido a la API de Web Scraping",
+        "documentation": "/docs",
+        "redoc": "/redoc",
+        "health_check": "/health"
+    }
+
 # Rutas de la API
 @app.post("/api/v1/scrape", response_model=ScrapeResponse, tags=["Scraping"])
 async def scrape_website(
