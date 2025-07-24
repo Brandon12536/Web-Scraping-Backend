@@ -94,12 +94,27 @@ app = FastAPI(
 )
 
 # Configuración CORS
+# Lista de orígenes permitidos
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Desarrollo frontend Vite
+    "http://127.0.0.1:5173",  # Alternativa localhost
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "Access-Control-Allow-Origin",
+    ],
+    expose_headers=["Content-Disposition"],
+    max_age=600,
 )
 
 # Cache para almacenar resultados temporalmente
