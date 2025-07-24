@@ -28,6 +28,8 @@ try:
     from fastapi.openapi.docs import get_swagger_ui_html
     from fastapi.openapi.utils import get_openapi
     import logging
+    logger = logging.getLogger("webscraper")
+    logger.setLevel(logging.INFO)
 
 except ImportError as e:
     print(f"Error importing dependencies: {e}")
@@ -860,11 +862,10 @@ async def run_scraper(request_id: str, url: str, max_pages: int, max_emails: int
     start_time = time.time()
     
     try:
-        # Configurar el timeout
-        async with asyncio.timeout(timeout):
+        # Configurar el timeout usando asyncio.wait_for
+        async def scrape_task():
             async with EmailScraper() as scraper:
                 logger.info(f"Iniciando escaneo de {url} (timeout: {timeout}s)")
-                
                 result = await scraper.scrape_website(
                     url=url,
                     max_pages=max_pages,
@@ -873,11 +874,9 @@ async def run_scraper(request_id: str, url: str, max_pages: int, max_emails: int
                     exclude_domains=exclude_domains or [],
                     max_depth=max_depth
                 )
-                
                 # Actualizar caché con resultados
                 emails_list = list(result.get("emails", set()))
                 exec_time = time.time() - start_time
-                
                 result_cache[request_id].update({
                     "status": "completed",
                     "emails": emails_list,
@@ -887,11 +886,11 @@ async def run_scraper(request_id: str, url: str, max_pages: int, max_emails: int
                     "completed_at": datetime.utcnow().isoformat(),
                     "timestamp": datetime.utcnow().isoformat()
                 })
-                
                 logger.info(f"Finalizado scraping de {url} en {exec_time:.2f}s. "
                             f"Páginas: {result.get('pages_scanned', 0)}, "
                             f"Correos: {len(emails_list)}")
-    
+        await asyncio.wait_for(scrape_task(), timeout=timeout)
+
     except asyncio.TimeoutError:
         error_msg = f"Tiempo de espera agotado ({timeout}s) para el escaneo de {url}"
         logger.error(error_msg)
@@ -901,7 +900,7 @@ async def run_scraper(request_id: str, url: str, max_pages: int, max_emails: int
             "execution_time_seconds": time.time() - start_time,
             "timestamp": datetime.utcnow().isoformat()
         })
-        
+
     except Exception as e:
         error_msg = f"Error en scraper para {url}: {str(e)}"
         logger.error(error_msg, exc_info=True)
