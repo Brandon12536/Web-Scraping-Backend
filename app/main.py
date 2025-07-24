@@ -283,6 +283,14 @@ class EmailScraper:
                 logger.error(f"Error al inicializar Tesseract en {tesseract_path}: {str(e)}")
                 return None
             
+            # Validar si la imagen es una ruta local y existe
+            from urllib.parse import urlparse
+            parsed = urlparse(image_url)
+            if not parsed.scheme or parsed.scheme == 'file':
+                # Es ruta local
+                if not os.path.exists(image_url):
+                    logger.warning(f"[OCR] Imagen local no encontrada: {image_url}")
+                    return None
             # Descargar la imagen
             async with self.session.get(image_url, timeout=10) as response:
                 if response.status != 200:
