@@ -33,6 +33,11 @@ except ImportError as e:
     print(f"Error importing dependencies: {e}")
     raise
 
+# Import auth router
+from . import auth
+import aiohttp
+from typing import Union
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -43,17 +48,14 @@ def custom_openapi():
         routes=app.routes,
     )
     openapi_schema["servers"] = [
-        {"url": "https://web-scraping-backend-2.onrender.com", "description": "Producción"},
-        {"url": "http://localhost:8000", "description": "Local"}
+        {"url": "https://web-scraping-backend-hlmu.onrender.com/", "description": "Producción"},
+        {"url": "http://localhost:5050", "description": "Local"}
     ]
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
 app.openapi = custom_openapi
 
-# Configuración de logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Limpieza de entradas antiguas en caché
 async def cleanup_old_entries(current_request_id: str, max_age_hours: int = 1):
