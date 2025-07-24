@@ -265,7 +265,16 @@ class EmailScraper:
         """
         try:
             # Configurar la ruta exacta de Tesseract encontrada en el sistema
-            tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+            import platform, os
+            system_type = platform.system()
+            if system_type == "Windows":
+                tesseract_path = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+            else:
+                tesseract_path = '/usr/bin/tesseract'
+            logger.info(f"[OCR] platform.system() = {system_type}, usando tesseract_path = {tesseract_path}")
+            if system_type != "Windows" and not os.path.exists(tesseract_path):
+                logger.error(f"[OCR] Tesseract no está instalado en {tesseract_path}. Instálalo con 'apt-get install tesseract-ocr'")
+                return None
             try:
                 pytesseract.pytesseract.tesseract_cmd = tesseract_path
                 # Verificar que Tesseract funciona

@@ -21,7 +21,8 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Instalar dependencias de Python
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN apt-get update && apt-get install -y tesseract-ocr && \
+    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copiar el resto de la aplicación
