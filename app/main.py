@@ -38,6 +38,42 @@ from . import auth
 import aiohttp
 from typing import Union
 
+# Instancia de FastAPI
+app = FastAPI(
+    title="🚀 FastAPI Email Scraper with Auth",
+    root_path=os.getenv("ROOT_PATH", ""),
+    description="""
+    API de alto rendimiento para extracción de correos electrónicos de sitios web.
+    
+    **Características:**
+    - Escaneo rápido y concurrente
+    - Documentación interactiva con Swagger UI
+    - Límites personalizables (páginas, correos, tiempo de espera)
+    - Filtrado de dominios y rutas
+    - Limpieza automática de caché
+    """,
+    version="1.0.0",
+    docs_url="/docs",  # Habilitar Swagger UI en /docs
+    redoc_url="/redoc",  # Habilitar ReDoc en /redoc
+    openapi_url="/openapi.json",  # Ruta del esquema OpenAPI
+    openapi_tags=[
+        {
+            "name": "Autenticación",
+            "description": "Operaciones de inicio/cierre de sesión y gestión de usuarios."
+        },
+        {
+            "name": "Scraping",
+            "description": "Extracción automatizada de correos electrónicos y datos de sitios web."
+        },
+        {
+            "name": "Estado",
+            "description": "Consulta el estado y funcionamiento actual del servicio de scraping."
+        }
+    ]
+)
+
+# Definir custom_openapi después de crear app
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -55,7 +91,6 @@ def custom_openapi():
     return app.openapi_schema
 
 app.openapi = custom_openapi
-
 
 # Limpieza de entradas antiguas en caché
 async def cleanup_old_entries(current_request_id: str, max_age_hours: int = 1):
