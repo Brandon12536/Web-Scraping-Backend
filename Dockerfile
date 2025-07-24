@@ -12,8 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Establecer variables de entorno
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    PORT=8000
+    PYTHONPATH=/app
 
 # Crear directorio para la aplicación
 WORKDIR /app
@@ -28,8 +27,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copiar el resto de la aplicación
 COPY . .
 
-# Puerto expuesto (usará el puerto de la variable de entorno PORT)
-EXPOSE $PORT
+# Puerto expuesto (Render inyecta el puerto real en $PORT, pero Docker necesita un valor fijo)
+EXPOSE 8000
 
-# Comando para ejecutar la aplicación
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+# Comando para ejecutar la aplicación (usa shell para que $PORT se expanda)
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
