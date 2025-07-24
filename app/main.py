@@ -94,12 +94,20 @@ app = FastAPI(
 )
 
 # Configuración CORS
-# Lista de orígenes permitidos
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Desarrollo frontend Vite
-    "http://127.0.0.1:5173",  # Alternativa localhost
-]
+# Obtener orígenes permitidos de la variable de entorno o usar valores por defecto
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS", 
+    "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
 
+# Eliminar espacios en blanco y filtrar cadenas vacías
+ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS if origin.strip()]
+
+# Si no hay orígenes configurados, usar una lista vacía (más seguro)
+if not ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS = []
+
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -114,7 +122,7 @@ app.add_middleware(
         "Access-Control-Allow-Origin",
     ],
     expose_headers=["Content-Disposition"],
-    max_age=600,
+    max_age=600,  # 10 minutos
 )
 
 # Cache para almacenar resultados temporalmente

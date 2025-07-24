@@ -20,6 +20,54 @@ wheels/
 .installed.cfg
 *.egg
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local development
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# Local development
+.python-version
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Temp files
+tmp/
+temp/
+
+# Project specific
+*.db
+*.sqlite3
+*.egg
+
 # Virtual Environment
 venv/
 ENV/
