@@ -1,11 +1,5 @@
-# Usar una imagen base de Python
-FROM python:3.9-slim
-
-# Establecer variables de entorno
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    PORT=8000
+# Usar una imagen base de Python 3.9
+FROM python:3.9.18-slim
 
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,6 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-eng \
     libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
+
+# Establecer variables de entorno
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PORT=8000
 
 # Crear directorio para la aplicación
 WORKDIR /app
@@ -32,4 +32,4 @@ COPY . .
 EXPOSE $PORT
 
 # Comando para ejecutar la aplicación
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$PORT"]
