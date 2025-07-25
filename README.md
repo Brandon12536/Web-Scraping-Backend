@@ -2,6 +2,9 @@
 
 API de alto rendimiento para extracción de correos electrónicos de sitios web, construida con FastAPI y asyncio.
 
+
+**Despliegue en Render:** [https://web-scraping-backend-hlmu.onrender.com/](https://web-scraping-backend-hlmu.onrender.com/)
+
 ## 🛠️ Tecnologías Principales
 
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white&style=for-the-badge)
