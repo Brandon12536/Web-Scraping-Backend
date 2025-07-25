@@ -19,35 +19,27 @@ import jwt
 import secrets
 import string
 from passlib.context import CryptContext
-from supabase import create_client, Client
+from .db import get_pg_pool
+import asyncpg
 
-# Si quieres, puedes dejar el try/except solo para lógica específica, no para imports masivos.
-
-# Inicializar cliente de Supabase con validación
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
-
-if not supabase_url or not supabase_key:
-    raise ValueError("Missing Supabase URL or Key in environment variables")
-
-try:
-    supabase: Client = create_client(supabase_url, supabase_key)
-    # Test the connection
-    supabase.table('users').select("*").limit(1).execute()
-except Exception as e:
-    print(f"Error initializing Supabase client: {e}")
-    raise
+# El cliente Supabase ha sido eliminado. Ahora se usará PostgreSQL puro con asyncpg.
 
 # Configuración de seguridad
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # URL del frontend para verificación de correo
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+if not FRONTEND_URL:
+    raise RuntimeError("FRONTEND_URL no está definido en el entorno (.env). Por favor, añádelo.")
 
 # Configuración JWT
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key")
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY no está definido en el entorno (.env). Por favor, añádelo.")
+ALGORITHM = os.getenv("JWT_ALGORITHM")
+if not ALGORITHM:
+    raise RuntimeError("JWT_ALGORITHM no está definido en el entorno (.env). Por favor, añádelo.")
 # Convert to int and handle potential None or invalid values
 try:
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 30))
@@ -241,17 +233,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
         raise credentials_exception
         
     # Obtener usuario de la base de datos
-    response = supabase.table('users').select('*').eq('email', email).execute()
-    
-    if not response.data:
-        raise credentials_exception
-        
-    user = response.data[0]
-    user = UserInDB(**user)
-    
-    if user is None:
-        raise credentials_exception
-    return user
+    pool = await get_pg_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
+        if not user:
+            raise credentials_exception
+        user = UserInDB(**user)
+        if user is None:
+            raise credentials_exception
+        return user
 
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)) -> UserInDB:
     if not current_user.is_active:
@@ -355,60 +345,49 @@ async def register(user: RegisterRequest, background_tasks: BackgroundTasks):
     """
     try:
         # Verificar si el correo ya está registrado
-        existing_user = supabase.table('users').select('*').eq('email', user.email).execute()
-        if existing_user.data and len(existing_user.data) > 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El correo electrónico ya está registrado"
-            )
+        pool = await get_pg_pool()
+        async with pool.acquire() as conn:
+            existing_user = await conn.fetchrow("SELECT * FROM users WHERE email = $1", user.email)
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El correo electrónico ya está registrado"
+                )
 
-        # Verificar si ya existe un administrador
-        admin_check = supabase.table('users').select('*').eq('role', 'admin').execute()
-        
-        # Asignar rol: admin si no hay administradores, cliente en caso contrario
-        role = 'admin' if not admin_check.data or len(admin_check.data) == 0 else 'client'
-        
-        # Generar un id único para el usuario (puedes usar uuid4 si quieres)
-        import uuid
-        user_id = str(uuid.uuid4())
-        # Generar código de verificación de 6 dígitos
-        verification_code = str(random.randint(100000, 999999))
-        verification_expiry = (datetime.utcnow() + timedelta(hours=24)).isoformat()
-        
-        # Insertar usuario en public.users según el esquema de la base de datos
-        user_record = {
-            'id_users': user_id,
-            'email': user.email,
-            'first_name': user.first_name or None,
-            'last_name': user.last_name or None,
-            'role': role,
-            'is_active': True,
-            'password_hash': get_password_hash(user.password),
-            'is_verified': False,
-            'verification_token': verification_code,  # Guardar el código de 6 dígitos
-            'verification_token_expiry': verification_expiry
-        }
-        
-        try:
-            # Intentar insertar el usuario
-            insert_response = supabase.table('users').insert(user_record).execute()
-            
-            if not insert_response.data:
-                raise Exception("No se recibieron datos en la respuesta de inserción")
-                
-        except Exception as e:
-            # Limpiar usuario de auth si falla la inserción en la base de datos
+            # Verificar si ya existe un administrador
+            admin_check = await conn.fetchrow("SELECT * FROM users WHERE role = 'admin' LIMIT 1")
+            # Asignar rol: admin si no hay administradores, cliente en caso contrario
+            role = 'admin' if not admin_check else 'client'
+
+            # Generar un id único para el usuario
+            import uuid
+            user_id = str(uuid.uuid4())
+            verification_code = str(random.randint(100000, 999999))
+            verification_expiry = datetime.utcnow() + timedelta(hours=24)
+
+            # Insertar usuario
             try:
-                supabase.auth.admin.delete_user(user_id)
-            except Exception as cleanup_e:
-                print(f"Error al limpiar el usuario de autenticación: {cleanup_e}")
-            
-            print(f"Error al insertar usuario: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error al crear el registro de usuario: {str(e)}"
-            )
-    
+                await conn.execute('''
+                    INSERT INTO users (id_users, email, first_name, last_name, role, is_active, password_hash, is_verified, verification_token, verification_token_expiry)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ''',
+                user_id,
+                user.email,
+                user.first_name or None,
+                user.last_name or None,
+                role,
+                True,
+                get_password_hash(user.password),
+                False,
+                verification_code,
+                verification_expiry)
+            except Exception as e:
+                print(f"Error al insertar usuario: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error al crear el registro de usuario: {str(e)}"
+                )
+
         # Enviar correo con el código de verificación
         background_tasks.add_task(
             send_verification_email,
@@ -416,7 +395,6 @@ async def register(user: RegisterRequest, background_tasks: BackgroundTasks):
             first_name=user.first_name or 'Usuario',
             verification_code=verification_code  # Enviar el código en lugar del enlace
         )
-        
         # Devolver datos del usuario sin información sensible
         return {
             'id': user_id,
@@ -451,54 +429,46 @@ async def login(login_data: LoginRequest):
     """
     try:
         # Buscar usuario por email en tu tabla
-        user_response = supabase.table('users').select('*').eq('email', login_data.email).single().execute()
-        user = user_response.data
-        if not user:
-            raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
-        # Verifica el hash de la contraseña
-        if not verify_password(login_data.password, user['password_hash']):
-            raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
-        # Verifica que esté verificado
-        if not user.get('is_verified'):
-            raise HTTPException(status_code=401, detail="Debes verificar tu correo electrónico antes de iniciar sesión")
-        # Genera el token JWT y responde
-        
-        # Crear token JWT
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": user["email"]}, 
-            expires_delta=access_token_expires
-        )
-        
-        # Preparar respuesta del usuario
-        user_response = {
-            'id_users': user['id_users'],
-            'email': user['email'],
-            'first_name': user.get('first_name'),
-            'last_name': user.get('last_name'),
-            'role': user.get('role', 'client'),
-            'is_active': user.get('is_active', True),
-            'is_verified': user.get('is_verified', False),
-            'company': user.get('company'),
-            'website': user.get('website'),
-            'is_super_admin': user.get('is_super_admin', False),
-            'created_at': user.get('created_at'),
-            'updated_at': user.get('updated_at'),
-                    }
-        
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": user_response
-        }
-        
+        pool = await get_pg_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT * FROM users WHERE email = $1", login_data.email)
+            if not user:
+                raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
+            # Verifica el hash de la contraseña
+            if not verify_password(login_data.password, user['password_hash']):
+                raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
+            # Verifica que esté verificado
+            if not user['is_verified']:
+                raise HTTPException(status_code=401, detail="Debes verificar tu correo electrónico antes de iniciar sesión")
+            # Crear token JWT
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            access_token = create_access_token(
+                data={"sub": user["email"]},
+                expires_delta=access_token_expires
+            )
+            # Preparar respuesta del usuario
+            user_response = {
+                'id_users': user['id_users'],
+                'email': user['email'],
+                'first_name': user.get('first_name'),
+                'last_name': user.get('last_name'),
+                'role': user.get('role', 'client'),
+                'is_active': user.get('is_active', True),
+                'is_verified': user.get('is_verified', False),
+                'company': user.get('company'),
+                'website': user.get('website'),
+                'is_super_admin': user.get('is_super_admin', False),
+                'created_at': user.get('created_at'),
+                'updated_at': user.get('updated_at'),
+            }
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": user_response
+            }
     except Exception as e:
-        print(f"Error en el inicio de sesión: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Correo electrónico o contraseña incorrectos",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        # Puedes agregar logging aquí si lo deseas
+        raise HTTPException(status_code=500, detail=f"Error en login: {str(e)}")
 
 @router.post("/verify-email")
 async def verify_email(verify_data: VerifyRequest):
@@ -507,19 +477,20 @@ async def verify_email(verify_data: VerifyRequest):
     """
     import logging
     try:
-        # Buscar usuario por email y código de verificación
-        user = supabase.table('users').select('*')\
-            .eq('email', verify_data.email)\
-            .eq('verification_token', verify_data.token)\
-            .execute()
-        
-        if not user.data or len(user.data) == 0:
+        # Buscar usuario por email y código de verificación en PostgreSQL
+        pool = await get_pg_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT * FROM users WHERE email = $1 AND verification_token = $2",
+                verify_data.email,
+                verify_data.token
+            )
+        if not user:
             logging.warning(f"No se encontró usuario con email={verify_data.email} y token={verify_data.token}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Código de verificación inválido o expirado"
             )
-        user = user.data[0]
         # Si ya está verificado
         if user.get('is_verified'):
             return {"message": "El correo electrónico ya está verificado"}
@@ -530,30 +501,12 @@ async def verify_email(verify_data: VerifyRequest):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El código de verificación no está disponible o ya fue usado"
             )
-        # Verificar si el código ha expirado
-        try:
-            expiry_date = user['verification_token_expiry']
-            if isinstance(expiry_date, str):
-                expiry_date = datetime.fromisoformat(expiry_date).replace(tzinfo=timezone.utc)
-            elif hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo is None:
-                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
-        except Exception as dt_err:
-            logging.error(f"Error al convertir la fecha de expiración: {dt_err}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error en la fecha de expiración: {dt_err}"
+        # Actualizar usuario como verificado y limpiar token
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET is_verified = TRUE, verification_token = NULL, verification_token_expiry = NULL WHERE email = $1",
+                verify_data.email
             )
-        if datetime.now(timezone.utc) > expiry_date:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El código de verificación ha expirado"
-            )
-        # Marcar como verificado y limpiar token
-        supabase.table('users').update({
-            'is_verified': True,
-            'verification_token': None,
-            'verification_token_expiry': None
-        }).eq('id_users', user['id_users']).execute()
         return {"message": "Correo verificado exitosamente"}
     except HTTPException:
         raise
@@ -570,45 +523,26 @@ async def forgot_password(reset_data: ResetPasswordRequest, background_tasks: Ba
     Enviar correo electrónico para restablecer la contraseña
     """
     try:
-        # Verificar si el usuario existe
-        response = supabase.table('users')\
-            .select('id_users,email,first_name')\
-            .eq('email', reset_data.email)\
-            .single()\
-            .execute()
-        
-        if not response.data:
-            # No revelar que el correo no existe
-            return {"message": "Si tu correo está registrado, recibirás un enlace para restablecer la contraseña"}
-        
-        user = response.data
-        reset_token = str(uuid.uuid4())
-        reset_expiry = (datetime.utcnow() + timedelta(hours=24)).isoformat()
-        
-        # Almacenar token de restablecimiento en la base de datos
-        supabase.table('users')\
-            .update({
-                'reset_password_token': reset_token,
-                'reset_password_token_expiry': reset_expiry,
-                'updated_at': datetime.utcnow().isoformat()
-            })\
-            .eq('id_users', user['id_users'])\
-            .execute()
-        
-        # En una aplicación real, aquí enviarías un correo con el enlace
-        reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
-        print(f"Enlace de restablecimiento de contraseña para {user['email']}: {reset_link}")
-        
-        # Enviar el correo real de recuperación
-        background_tasks.add_task(
-            send_reset_password_email,
-            email=user['email'],
-            first_name=user.get('first_name', 'Usuario'),
-            reset_link=reset_link
-        )
-        
+        pool = await get_pg_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT id_users, email, first_name FROM users WHERE email = $1", reset_data.email)
+            if not user:
+                # No revelar que el correo no existe
+                return {"message": "Si tu correo está registrado, recibirás un enlace para restablecer la contraseña"}
+            # Generar token de restablecimiento y expiración
+            reset_token = secrets.token_urlsafe(32)
+            expiry = datetime.utcnow() + timedelta(hours=1)
+            await conn.execute('''
+                UPDATE users SET reset_password_token = $1, reset_password_token_expiry = $2 WHERE id_users = $3
+            ''', reset_token, expiry, user['id_users'])
+            reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
+            background_tasks.add_task(
+                send_reset_password_email,
+                email=user['email'],
+                first_name=user.get('first_name', 'Usuario'),
+                reset_link=reset_link
+            )
         return {"message": "Si tu correo está registrado, recibirás un enlace para restablecer la contraseña"}
-        
     except Exception as e:
         print(f"Error al solicitar restablecimiento de contraseña: {str(e)}")
         # No revelar el error real al usuario
@@ -620,43 +554,39 @@ async def reset_password(reset_data: NewPasswordRequest):
     Restablecer la contraseña usando el token de restablecimiento
     """
     try:
-        # Buscar usuario por token de restablecimiento
-        response = supabase.table('users')\
-            .select('*')\
-            .eq('reset_password_token', reset_data.token)\
-            .single()\
-            .execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Token de restablecimiento inválido o expirado"
-            )
-        
-        user = response.data
-        
-        # Verificar si el token ha expirado
-        expiry_date = datetime.fromisoformat(user['reset_password_token_expiry'])
-        now = datetime.now(expiry_date.tzinfo) if expiry_date.tzinfo else datetime.utcnow()
-        if now > expiry_date:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El enlace de restablecimiento ha expirado"
-            )
-        
-        # Actualizar hash de contraseña en la base de datos
-        supabase.table('users')\
-            .update({
-                'password_hash': get_password_hash(reset_data.new_password),
-                'reset_password_token': None,
-                'reset_password_token_expiry': None,
-                'updated_at': datetime.utcnow().isoformat()
-            })\
-            .eq('id_users', user['id_users'])\
-            .execute()
-        
+        pool = await get_pg_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT * FROM users WHERE reset_password_token = $1", reset_data.token)
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Token de restablecimiento inválido o expirado"
+                )
+            # Verificar expiración y limpiar si hay datos corruptos
+            expiry = user['reset_password_token_expiry']
+            if isinstance(expiry, str):
+                # Limpieza automática: borra el token inválido
+                await conn.execute(
+                    "UPDATE users SET reset_password_token = NULL, reset_password_token_expiry = NULL WHERE id_users = $1",
+                    user['id_users']
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El token de restablecimiento era inválido y ha sido eliminado. Solicita uno nuevo."
+                )
+            if expiry and expiry.replace(tzinfo=None) < datetime.utcnow().replace(tzinfo=None):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El token de restablecimiento ha expirado"
+                )
+            # Actualizar la contraseña
+            await conn.execute('''
+                UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_token_expiry = NULL, updated_at = $2 WHERE id_users = $3
+            ''',
+            get_password_hash(reset_data.new_password),
+            datetime.utcnow(),
+            user['id_users'])
         return {"message": "Contraseña restablecida exitosamente"}
-        
     except Exception as e:
         print(f"Error al restablecer la contraseña: {str(e)}")
         raise HTTPException(

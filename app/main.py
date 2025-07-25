@@ -74,6 +74,196 @@ app = FastAPI(
     ]
 )
 
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def root():
+    return """
+    <!DOCTYPE html>
+    <html lang='es'>
+    <head>
+        <meta charset='UTF-8'>
+        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        <title>FastAPI Email Scraper</title>
+        <link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css' rel='stylesheet'>
+        <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap' rel='stylesheet'>
+        <style>
+            body {
+                min-height: 100vh;
+                background: linear-gradient(120deg,#e0e7ff 0%,#f0fdfa 100%) no-repeat;
+                font-family: 'Inter', sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.6s;
+            }
+            .hero {
+                padding: 3.5rem 2rem 2.2rem 2rem;
+                text-align: center;
+                max-width: 420px;
+                margin: 3rem auto 0 auto;
+                background: rgba(255,255,255,0.98);
+                border-radius: 2.2rem;
+                box-shadow: 0 8px 40px 0 #6366f120, 0 1.5px 0 #fff8;
+                border: 1.5px solid #dbeafe;
+                position: relative;
+                overflow: hidden;
+                opacity: 0;
+                transform: scale(0.85) translateY(40px);
+                animation: hero-in 0.9s cubic-bezier(.4,2,.6,1) 0.3s forwards;
+            }
+            .hero::before {
+                content: "";
+                position: absolute;
+                z-index: 0;
+                left: -40%;
+                top: -30%;
+                width: 180%;
+                height: 80%;
+                background: radial-gradient(circle at 60% 40%, #38bdf8 0%, #6366f1 70%, transparent 100%);
+                opacity: 0.11;
+            }
+            .hero-title {
+                font-size: 2.25rem;
+                font-weight: 800;
+                color: #2563eb;
+                letter-spacing: -1px;
+                margin-bottom: 0.6rem;
+                background: linear-gradient(90deg,#2563eb 20%,#38bdf8 80%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
+            .hero-desc {
+                color: #64748b;
+                margin-bottom: 2.1rem;
+                font-size: 1.13rem;
+                font-weight: 400;
+            }
+            .btn-custom {
+                min-width: 210px;
+                margin: 0.4rem 0.6rem;
+                font-size: 1.11rem;
+                border-radius: 1.35rem;
+                font-weight: 600;
+                box-shadow: 0 2px 12px #2563eb11;
+                transition: transform 0.12s, box-shadow 0.15s;
+                border: none;
+                outline: none;
+                position: relative;
+                overflow: hidden;
+            }
+            .btn-custom:active {
+                transform: scale(0.97);
+                box-shadow: 0 1px 4px #2563eb22;
+            }
+            .btn-primary {
+                background: linear-gradient(90deg,#6366f1 0,#38bdf8 100%)!important;
+                color: #fff!important;
+            }
+            .btn-primary:hover {
+                background: linear-gradient(90deg,#38bdf8 0,#6366f1 100%)!important;
+            }
+            .btn-outline-secondary {
+                background: #fff!important;
+                color: #6366f1!important;
+                border: 2px solid #6366f1!important;
+            }
+            .btn-outline-secondary:hover {
+                background: #6366f1!important;
+                color: #fff!important;
+            }
+            .btn-success {
+                background: linear-gradient(90deg,#22d3ee 0,#2563eb 100%)!important;
+                border: 0;
+                color: #fff!important;
+            }
+            .btn-success:hover {
+                background: linear-gradient(90deg,#2563eb 0,#22d3ee 100%)!important;
+            }
+            .result-box {
+                margin-top: 2.1rem;
+                font-size: 1.13rem;
+                min-height: 32px;
+            }
+            .rocket {
+                margin-bottom: 1.3rem;
+                filter: drop-shadow(0 2px 16px #38bdf822);
+                width: 62px;
+                will-change: transform;
+                animation: rocket-float 2.5s ease-in-out infinite;
+                transition: filter 0.5s;
+            }
+            .rocket:hover {
+                filter: drop-shadow(0 4px 32px #6366f199) hue-rotate(30deg) saturate(1.5);
+                animation: rocket-spin 1.2s cubic-bezier(.4,2,.6,1) infinite alternate;
+            }
+            @keyframes rocket-float {
+                0%,100% { transform: translateY(0) rotate(-6deg); }
+                50% { transform: translateY(-18px) rotate(8deg); }
+            }
+            @keyframes rocket-spin {
+                0% { transform: scale(1.13) rotate(-10deg); }
+                100% { transform: scale(1.13) rotate(370deg); }
+            }
+            @keyframes hero-in {
+                to { opacity: 1; transform: scale(1) translateY(0); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class='hero'>
+            <img class='rocket' src='https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f680.svg' alt='rocket' />
+            <div class='hero-title'>FastAPI Email Scraper</div>
+            <div class='hero-desc'>API profesional y minimalista para extracción de correos electrónicos.<br>Con autenticación y scraping avanzado.</div>
+            <div class='d-flex flex-column align-items-center mb-2'>
+                <a href='/docs' class='btn btn-primary btn-lg btn-custom mb-2'>📑 Documentación</a>
+                <a href='/redoc' class='btn btn-outline-secondary btn-lg btn-custom mb-2'>📘 ReDoc</a>
+                <button id='db-test-btn' class='btn btn-success btn-lg btn-custom mb-2'>🔌 Probar conexión</button>
+            </div>
+            <div id='db-result' class='result-box'></div>
+        </div>
+        <script>
+            // Fondo animado exótico
+            let angle = 120;
+            setInterval(() => {
+                angle = (angle + 0.18) % 360;
+                document.body.style.background = `linear-gradient(${angle}deg,#e0e7ff 0%,#f0fdfa 100%)`;
+            }, 30);
+            // Botones con brillo y rebote
+            document.querySelectorAll('.btn-custom').forEach(btn => {
+                btn.addEventListener('mouseenter', e => {
+                    btn.style.boxShadow = '0 0 0 7px #38bdf866, 0 2px 12px #2563eb22';
+                    btn.style.transform = 'scale(1.09)';
+                });
+                btn.addEventListener('mouseleave', e => {
+                    btn.style.boxShadow = '0 2px 12px #2563eb11';
+                    btn.style.transform = 'scale(1)';
+                });
+            });
+            // Test conexión
+            const dbBtn = document.getElementById('db-test-btn');
+            const result = document.getElementById('db-result');
+            dbBtn.addEventListener('click', async () => {
+                result.innerHTML = '<span class="text-secondary">Conectando a la base de datos...</span>';
+                try {
+                    const res = await fetch('/health');
+                    if (!res.ok) throw new Error('Error de conexión');
+                    const data = await res.json();
+                    if (data.status === 'ok') {
+                        result.innerHTML = '<span class="text-success fw-bold">✅ ¡Conexión exitosa a PostgreSQL!</span>';
+                    } else {
+                        result.innerHTML = '<span class="text-warning fw-bold">⚠️ La conexión responde pero no es exitosa.</span>';
+                    }
+                } catch (err) {
+                    result.innerHTML = '<span class="text-danger fw-bold">❌ Error al conectar con la base de datos.</span>';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+
 # Definir custom_openapi después de crear app
 
 def custom_openapi():
@@ -86,8 +276,8 @@ def custom_openapi():
         routes=app.routes,
     )
     openapi_schema["servers"] = [
-        {"url": "https://web-scraping-backend-hlmu.onrender.com/", "description": "Producción"},
-        {"url": "http://localhost:5050", "description": "Local"}
+        {"url": "https://web-scraping-backend-hlmu.onrender.com/", "description": "Servidor de producción"},
+        {"url": "http://localhost:8000", "description": "Servidor local de desarrollo"}
     ]
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -111,39 +301,6 @@ async def cleanup_old_entries(current_request_id: str, max_age_hours: int = 1):
 
 # Load environment variables
 load_dotenv()
-
-app = FastAPI(
-    title="🚀 FastAPI Email Scraper with Auth",
-    root_path=os.getenv("ROOT_PATH", ""),
-    description="""
-    API de alto rendimiento para extracción de correos electrónicos de sitios web.
-    
-    **Características:**
-    - Escaneo rápido y concurrente
-    - Documentación interactiva con Swagger UI
-    - Límites personalizables (páginas, correos, tiempo de espera)
-    - Filtrado de dominios y rutas
-    - Limpieza automática de caché
-    """,
-    version="1.0.0",
-    docs_url="/docs",  # Habilitar Swagger UI en /docs
-    redoc_url="/redoc",  # Habilitar ReDoc en /redoc
-    openapi_url="/openapi.json",  # Ruta del esquema OpenAPI
-    openapi_tags=[
-        {
-            "name": "Autenticación",
-            "description": "Operaciones de inicio/cierre de sesión y gestión de usuarios."
-        },
-        {
-            "name": "Scraping",
-            "description": "Extracción automatizada de correos electrónicos y datos de sitios web."
-        },
-        {
-            "name": "Estado",
-            "description": "Consulta el estado y funcionamiento actual del servicio de scraping."
-        }
-    ]
-)
 
 # Configuración CORS
 # Obtener orígenes permitidos de la variable de entorno o usar valores por defecto
