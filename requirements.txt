@@ -22,3 +22,4 @@ typing-extensions>=4.5.0
 urllib3>=1.26.15,<2.1.0
 certifi>=2023.5.7
 brotli
+PyJWT>=2.8.0
