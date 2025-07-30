@@ -276,7 +276,7 @@ def custom_openapi():
         routes=app.routes,
     )
     openapi_schema["servers"] = [
-        {"url": "https://web-scraping-backend-hlmu.onrender.com/", "description": "Servidor de producción"},
+        {"url": "https://web-scraping-backend-hlmu.onrender.com", "description": "Servidor de producción"},
         {"url": "http://localhost:8000", "description": "Servidor local de desarrollo"}
     ]
     app.openapi_schema = openapi_schema
@@ -299,42 +299,27 @@ async def cleanup_old_entries(current_request_id: str, max_age_hours: int = 1):
             del result_cache[req_id]
             logger.debug(f"Eliminada entrada antigua de caché: {req_id}")
 
-# Load environment variables
+
 load_dotenv()
 
-# Configuración CORS
-# Obtener orígenes permitidos de la variable de entorno o usar valores por defecto
-ALLOWED_ORIGINS = os.getenv(
-    "ALLOWED_ORIGINS", 
-    "http://localhost:5173,http://127.0.0.1:5173"
-).split(",")
 
-# Eliminar espacios en blanco y filtrar cadenas vacías
-ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS if origin.strip()]
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://web-scraping-backend-hlmu.onrender.com"
+]
 
-# Si no hay orígenes configurados, usar una lista vacía (más seguro)
-if not ALLOWED_ORIGINS:
-    ALLOWED_ORIGINS = []
-
-# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "Accept",
-        "Origin",
-        "X-Requested-With",
-        "Access-Control-Allow-Origin",
-    ],
-    expose_headers=["Content-Disposition"],
-    max_age=600,  # 10 minutos
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Cache para almacenar resultados temporalmente
+
 result_cache: Dict[str, Dict[str, Any]] = {}
 
 class ScrapeRequest(BaseModel):
@@ -914,17 +899,12 @@ class EmailScraper:
 app.include_router(auth.router)
 
 # Ruta raíz
-@app.get("/", tags=["Inicio"])
-async def root():
-    """Página de inicio de la API"""
-    return {
-        "message": "Bienvenido a la API de Web Scraping",
-        "documentation": "/docs",
-        "redoc": "/redoc",
-        "health_check": "/health"
-    }
 
 # Rutas de la API
+from app.auth import get_current_active_user
+from fastapi import Depends
+from app.db import get_pg_pool
+
 @app.post("/api/v1/scrape", response_model=ScrapeResponse, tags=["Scraping"])
 async def scrape_website(
     request: ScrapeRequest,
@@ -1026,7 +1006,7 @@ async def get_open_api_endpoint():
 # Tarea en segundo plano para el escaneo
 async def run_scraper(request_id: str, url: str, max_pages: int, max_emails: int, 
                      include_paths: List[str] = None, exclude_domains: List[str] = None,
-                     max_depth: int = 3, timeout: int = 300):
+                     max_depth: int = 3, timeout: int = 300, user_id: str = None):
     """
     Función para ejecutar el scraper en segundo plano con timeout
     
@@ -1063,6 +1043,38 @@ async def run_scraper(request_id: str, url: str, max_pages: int, max_emails: int
                 logger.info(f"Finalizado scraping de {url} en {exec_time:.2f}s. "
                             f"Páginas: {result.get('pages_scanned', 0)}, "
                             f"Correos: {len(emails_list)}")
+
+                # Guardar en la base de datos solo si hay correos encontrados
+                if emails_list:
+                    try:
+                        pool = await get_pg_pool()
+                        async with pool.acquire() as conn:
+                            # Buscar los correos que ya existen
+                            rows = await conn.fetch(
+                                """
+                                SELECT email FROM found_emails WHERE user_id IS NULL AND url = $1 AND email = ANY($2::text[])
+                                """,
+                                url, emails_list
+                            )
+                            existentes = {row['email'] for row in rows}
+                            nuevos = [email for email in emails_list if email not in existentes]
+                            if nuevos:
+                                await conn.executemany(
+                                    """
+                                    INSERT INTO found_emails (user_id, email, url, found_at)
+                                    VALUES (NULL, $1, $2, NOW())
+                                    ON CONFLICT (email, url, user_id) DO NOTHING
+                                    """,
+                                    [(email, url) for email in nuevos]
+                                )
+                                logger.info(f"Se guardaron {len(nuevos)} correos anónimos en la base de datos.")
+                                result_cache[request_id]["message"] = f"Correos almacenados exitosamente. Se insertaron los siguientes correos: {', '.join(nuevos)}"
+                            else:
+                                logger.info("No hay correos nuevos para insertar.")
+                                result_cache[request_id]["message"] = "No hay correos nuevos para insertar."
+                    except Exception as db_err:
+                        logger.error(f"Error guardando correos en la base de datos: {db_err}")
+
         await asyncio.wait_for(scrape_task(), timeout=timeout)
 
     except asyncio.TimeoutError:

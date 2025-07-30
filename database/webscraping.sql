@@ -54,3 +54,16 @@ BEGIN
         EXECUTE FUNCTION update_modified_column();
     END IF;
 END$$;
+
+
+
+CREATE TABLE IF NOT EXISTS public.found_emails (
+    id_found_emails SERIAL PRIMARY KEY,
+    user_id UUID NULL REFERENCES public.users(id_users) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    url TEXT NOT NULL,
+    found_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(email, url, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_found_emails_user_id ON public.found_emails(user_id);
+CREATE INDEX IF NOT EXISTS idx_found_emails_email ON public.found_emails(email);
